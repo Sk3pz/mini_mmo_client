@@ -1,0 +1,54 @@
+use capnp::message::{TypedReader, Builder, HeapAllocator};
+use crate::packet_capnp::{entry_point, login};
+use std::borrow::Borrow;
+use capnp::serialize;
+use std::net::TcpStream;
+use crate::network::login_data::LoginData;
+
+pub fn write_entry_point_ver(mut stream: &TcpStream, version: String) -> ::capnp::Result<()> {
+    let mut message = Builder::new_default();
+    {
+        let mut ep = message.init_root::<entry_point::Builder>();
+        ep.set_version(version.as_str());
+    }
+    serialize::write_message(&mut stream, &message)
+}
+
+pub fn write_entry_login_attempt(mut stream: &TcpStream, login_data: LoginData) -> ::capnp::Result<()> {
+    let mut message = Builder::new_default();
+    {
+        let mut ep = message.init_root::<entry_point::Builder>();
+        let mut login = ep.init_login_attempt();
+        login.set_email(login_data.email.as_str());
+        login.set_username(login_data.username.as_str());
+        login.set_password(login_data.passwd.as_str());
+        login.set_signup(login_data.signup);
+    }
+    serialize::write_message(&mut stream, &message)
+}
+
+/// Returns LoginData, version, error
+pub fn read_entry_point(mut stream: &TcpStream) -> (Option<LoginData>, Option<String>, Option<String>) {
+    let message_reader = serialize::read_message(&mut stream, ::capnp::message::ReaderOptions::new()).expect("Uh oh!");
+    let ep = message_reader.get_root::<entry_point::Reader>().expect("Uh oh 2!");
+
+    return match ep.which() {
+        Ok(entry_point::LoginAttempt(login_data)) => {
+            let raw_ld = login_data.unwrap();
+            let ld = LoginData {
+                email: raw_ld.get_email().unwrap().to_string(),
+                username: raw_ld.get_username().unwrap().to_string(),
+                passwd: raw_ld.get_password().unwrap().to_string(),
+                signup: raw_ld.get_signup(),
+            };
+            (Some(ld), None, None)
+        }
+        Ok(entry_point::Version(ver)) => {
+            (None, Some(ver.unwrap().to_string()), None)
+        }
+        Err(::capnp::NotInSchema(_)) => {
+            // todo: error
+            (None, None, Some(String::from("Invalid EntryPoint - no version or login data found!")))
+        }
+    }
+}
