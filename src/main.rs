@@ -6,12 +6,24 @@ use crate::network::entry_response_io::read_entry_response;
 use crate::network::login_data::LoginData;
 use crate::network::event_io::{read_event, write_event_keepalive, write_event_message};
 use std::io;
+use std::process::Command;
 
 pub mod network;
 pub mod utils;
 pub mod packet_capnp;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(target_os = "linux")]
+pub const CLEAR: &str = "clear";
+#[cfg(target_os = "windows")]
+pub const CLEAR: &str = "cls";
+#[cfg(target_os = "macos")]
+pub const CLEAR: &str = "clear";
+
+fn clear_console() {
+    Command::new(CLEAR).status().expect("Failed to run clear command");
+}
 
 fn connection_err(ip: &str, port: &str) {
     eprintln!("{}Failed to connect to the server.", Color::Red);
@@ -28,7 +40,7 @@ pub fn get_input<S: Into<String>>(prompt: S) -> String {
     io::stdout().flush();
     let read = read_console();
     let input = read.replace("\n", "");
-    println!();
+    clear_console();
     input
 }
 
