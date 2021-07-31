@@ -1,6 +1,6 @@
 use better_term::style::Color;
 use std::net::TcpStream;
-use std::io::{Write, Read, stdin};
+use std::io::{Write, Read, stdin, stdout};
 use crate::network::entry_point_io::{write_entry_point_ver, write_entry_login_attempt};
 use crate::network::entry_response_io::read_entry_response;
 use crate::network::login_data::LoginData;
@@ -8,7 +8,12 @@ use crate::network::event_io::{read_event, write_event_keepalive, write_event_me
 use std::io;
 use std::process::Command;
 use crate::command::CommandMuncher;
-use crossterm_cursor::cursor;
+use crossterm::{
+    execute,
+    cursor::MoveTo,
+    terminal::{Clear, size},
+};
+use crossterm::terminal::ClearType;
 
 pub mod utils;
 pub mod packet_capnp;
@@ -24,12 +29,16 @@ pub const CLEAR: &str = "cls";
 #[cfg(target_os = "macos")]
 pub const CLEAR: &str = "clear";
 
-fn clear_console() {
-    Command::new(CLEAR).status().expect("Failed to run clear command");
+fn clear_term() {
+    execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0));
 }
 
 fn set_cursor_pos(x: u16, y: u16) {
-    cursor().goto(x, y);
+    execute!(stdout(), MoveTo(x, y));
+}
+
+fn get_term_size() -> (u16, u16) {
+    size().expect("Failed to get terminal size")
 }
 
 fn connection_err(ip: &str, port: &str) {
@@ -38,31 +47,14 @@ fn connection_err(ip: &str, port: &str) {
 
 fn nom_data(data: String) -> Vec<String> {
     let mut cmds = Vec::new();
-    let mut current = String::from("");
-    let mut flag = false;
-    for c in data.chars() {
-        match c {
-            '!' => flag = true,
-            ';' => {
-                if flag {
-                    flag = false;
-                    current = format!("{};", current.clone());
-                    continue;
-                }
 
-                cmds.push(current.clone());
-                current = String::from("");
-            }
-            _ => {
-                if flag {
-                    flag = false;
-                    current = format!("{}!", current.clone());
-                }
-                current = format!("{}{}", current.clone(), c);
-            }
-        }
+    data.replace("!;!", "\r");
+    let split = data.split(";");
+
+    for s in split {
+        cmds.push(s.replace("\r", ";"));
     }
-    cmds.push(current);
+
     cmds
 }
 
@@ -77,7 +69,7 @@ pub fn get_input<S: Into<String>>(prompt: S) -> String {
     io::stdout().flush();
     let read = read_console();
     let input = read.replace("\n", "");
-    clear_console();
+    clear_term();
     input
 }
 
@@ -98,9 +90,15 @@ fn main() {
 
     write_entry_point_ver(&stream, VERSION.to_string());
 
+    // TODO: Move ping to login and only have one connection
+
     let (valid, _, server_version, err) = read_entry_response(&stream);
     if server_version.is_some() {
         //println!("Valid: {}\nserver version: {}", valid, server_version.unwrap());
+        if !valid {
+            println!("{}Your client is outdated! The server is running {} while you're still on {}! Please make sure to update!", Color::Red, server_version.unwrap(), VERSION);
+            return;
+        }
     } else {
         if err.is_some() {
             println!("Valid: {}\nerror: {}", valid, err.unwrap());
@@ -197,7 +195,7 @@ fn main() {
     let mut muncher: CommandMuncher<Result<(), String>> = CommandMuncher::new();
 
     muncher.register("clear", |args| {
-        clear_console();
+        clear_term();
         Ok(())
     });
     muncher.register("cursor", |args| {
@@ -243,12 +241,17 @@ fn main() {
 
             // Process the commands from the server
             for cmd in nom_data(server_msg.data) {
-                muncher.munch(cmd);
+                let result = muncher.munch(cmd);
+                if result.is_err() {
+                    println!("Encountered error in munching command: {}", result.unwrap_err());
+                }
             }
 
             // get input and send it to the server to process
             let input = get_input("> ");
-            write_event_message(&stream, input, "".to_string());
+            let term_size = get_term_size();
+            let data = format!("{},{}", term_size.0, term_size.1);
+            write_event_message(&stream, input, data);
         } else if time.is_some() {
             write_event_keepalive(&stream);
         } else {
