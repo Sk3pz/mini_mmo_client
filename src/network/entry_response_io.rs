@@ -14,12 +14,12 @@ pub fn write_valid_entry_response(mut stream: &TcpStream, motd: String) -> ::cap
     serialize::write_message(&mut stream, &message)
 }
 
-pub fn write_invalid_entry_response(mut stream: &TcpStream, err: String) -> ::capnp::Result<()> {
+pub fn write_invalid_entry_response<S: Into<String>>(mut stream: &TcpStream, err: S) -> ::capnp::Result<()> {
     let mut message = Builder::new_default();
     {
         let mut er = message.init_root::<entry_response::Builder>();
         er.set_valid(false);
-        er.set_error(err.as_str());
+        er.set_error(err.into().as_str());
     }
     serialize::write_message(&mut stream, &message)
 }
@@ -41,7 +41,11 @@ pub fn read_entry_response(mut stream: &TcpStream) -> (bool, Option<String>, Opt
         return (false, None, None, Some(String::from("Could not connect to server.")));
     }
     let message_reader = message_reader_result.unwrap();
-    let er = message_reader.get_root::<entry_response::Reader>().expect("Uh oh 2!");
+    let er_raw = message_reader.get_root::<entry_response::Reader>();
+    if er_raw.is_err() {
+        return (false, None, None, Some(String::from("Could not connect to server.")));
+    }
+    let er = er_raw.unwrap();
 
     return match er.which() {
         Ok(entry_response::Version(v)) => {
