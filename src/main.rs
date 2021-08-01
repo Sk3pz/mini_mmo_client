@@ -13,7 +13,7 @@ use crossterm::{
     cursor::MoveTo,
     terminal::{Clear, size},
 };
-use crossterm::terminal::ClearType;
+use crossterm::terminal::{ClearType, SetSize};
 
 pub mod utils;
 pub mod packet_capnp;
@@ -39,6 +39,10 @@ fn set_cursor_pos(x: u16, y: u16) {
 
 fn get_term_size() -> (u16, u16) {
     size().expect("Failed to get terminal size")
+}
+
+fn set_term_size(width: u16, height: u16) {
+    execute!(stdout(), SetSize(width, height));
 }
 
 fn connection_err(ip: &str, port: &str) {
@@ -79,6 +83,8 @@ fn main() {
     let ip = "localhost";
     let port = "2277";
     let address = format!("{}:{}", ip, port);
+
+    println!("Connecting to {}", address.clone());
 
     let mut stream_result = TcpStream::connect(address.clone());
     if stream_result.is_err() {
@@ -215,6 +221,25 @@ fn main() {
         let y = yr.unwrap();
 
         set_cursor_pos(x, y);
+        Ok(())
+    });
+    muncher.register("size", |args| {
+        if args.len() < 2 {
+            return Err("Invalid parameters: size command takes two parameters of type u16".to_string());
+        }
+        let xs = args.get(0).unwrap();
+        let ys = args.get(1).unwrap();
+
+        let x = xs.parse::<u16>();
+        let y = ys.parse::<u16>();
+        if x.is_err() || y.is_err() {
+            return Err("Invalid parameters: size command takes two parameters of type u16".to_string());
+        }
+
+        let width = x.unwrap();
+        let height = y.unwrap();
+
+        set_term_size(width, height);
         Ok(())
     });
     muncher.register("print", |args| {
